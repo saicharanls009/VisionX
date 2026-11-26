@@ -1,0 +1,80 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function role() {
+      return signedIn()
+        ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role
+        : null;
+    }
+
+    function isAssistant() {
+      return role() == 'assistant';
+    }
+
+    function isOfficer() {
+      return role() == 'officer';
+    }
+
+    function managesFarmers() {
+      return isAssistant() || isOfficer();
+    }
+
+    match /users/{uid} {
+      allow get: if signedIn() && request.auth.uid == uid;
+      allow list: if false;
+      // An authenticated Assistant can create a farmer role only; no client can
+      // create or modify an assistant/officer role.
+      allow create: if isAssistant() && request.resource.data.keys()
+        .hasOnly(['role', 'createdAt', 'createdBy']) &&
+        request.resource.data.role == 'farmer' &&
+        request.resource.data.createdBy == request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    match /farmers/{farmerUid} {
+      allow read: if signedIn() && (request.auth.uid == farmerUid || managesFarmers());
+      allow create: if isAssistant() && request.resource.data.farmerUid == farmerUid &&
+        existsAfter(/databases/$(database)/documents/users/$(farmerUid)) &&
+        getAfter(/databases/$(database)/documents/users/$(farmerUid)).data.role == 'farmer';
+      allow update: if (managesFarmers() &&
+          request.resource.data.farmerUid == resource.data.farmerUid) ||
+        (request.auth.uid == farmerUid &&
+          request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['name', 'village', 'district', 'crops']));
+      allow delete: if isOfficer();
+    }
+
+    // A deterministic single-document lookup resolves Farmer ID or mobile before
+    // Firebase Authentication validates the PIN. PINs are never stored here.
+    match /farmer_login_identifiers/{identifier} {
+      allow get: if true;
+      allow list, update, delete: if false;
+      allow create: if isAssistant() && request.resource.data.keys()
+        .hasOnly(['uid', 'authEmail', 'createdAt']) &&
+        request.resource.data.uid is string && request.resource.data.authEmail is string;
+    }
+
+    match /appointments/{appointmentId} {
+      allow read: if signedIn() &&
+        (resource.data.farmerId == request.auth.uid || managesFarmers());
+      allow create: if signedIn() && request.resource.data.farmerId is string &&
+        (isAssistant() || request.resource.data.farmerId == request.auth.uid);
+      allow update, delete: if isOfficer();
+    }
+
+    match /procurements/{procurementId} {
+      allow read: if signedIn() &&
+        (resource.data.farmerId == request.auth.uid || managesFarmers());
+      allow create, update, delete: if isOfficer();
+    }
+
+    match /procurement_centers/{centerId} {
+      allow read: if signedIn();
+      allow create, update, delete: if isOfficer();
+    }
+  }
+}

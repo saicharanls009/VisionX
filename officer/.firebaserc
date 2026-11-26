@@ -1,0 +1,15 @@
+{
+  "projects": {
+    "default": "smart-farmer-procurement"
+  },
+  "targets": {
+    "smart-farmer-procurement": {
+      "hosting": {
+        "officer": [
+          "smart-farmer-officer"
+        ]
+      }
+    }
+  },
+  "etags": {}
+}
