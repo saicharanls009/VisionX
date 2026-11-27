@@ -1,1 +1,0 @@
-"""SmartProcure local analytics backend."""
